@@ -208,6 +208,18 @@ export default function Home() {
       </header>
 
       <main className="wrap">
+        <a href="/compare" style={{ textDecoration: "none", color: "inherit" }}>
+          <div className="card" style={{ marginBottom: 12, borderColor: "#355c4d" }}>
+            <div className="row">
+              <div>
+                <div className="label">New experiment</div>
+                <div className="mid">Open Multi-Strategy Compare →</div>
+                <div className="small">Strict, long/short, fast x1/x2/x3/x5, adaptive leverage, buy & hold and cash.</div>
+              </div>
+              <div className="pill pos">1m checks</div>
+            </div>
+          </div>
+        </a>
         <div className={`cloudBanner ${engineClass}`}>
           <div>
             <div className="cloudTitle">{engineTitle}</div>

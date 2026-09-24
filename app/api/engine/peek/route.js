@@ -17,7 +17,7 @@ export async function GET(request) {
 
   try {
     const run = getRun(runId);
-    const reader = run.getReadable({ namespace: "state" }).getReader();
+    const reader = run.getReadable({ namespace: "state", startIndex: 0 }).getReader();
     const decoder = new TextDecoder();
     let buffer = "";
     let latest = null;
@@ -27,7 +27,7 @@ export async function GET(request) {
       reads += 1;
       const result = await Promise.race([
         reader.read(),
-        new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), 250)),
+        new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), 2000)),
       ]);
 
       if (result?.timeout) break;

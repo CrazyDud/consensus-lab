@@ -120,55 +120,36 @@ export default function Home() {
   useEffect(() => {
     if (!runId) return;
     let stopped = false;
-    const controller = new AbortController();
-    abortRef.current = controller;
 
-    async function connect() {
-      setStreamError("");
+    async function loadCloudState() {
       try {
-        const response = await fetch(`/api/engine/stream?runId=${encodeURIComponent(runId)}`, {
+        const response = await fetch(`/api/engine/peek?runId=${encodeURIComponent(runId)}`, {
           cache: "no-store",
-          signal: controller.signal,
         });
-        if (!response.ok || !response.body) {
-          const body = await response.text();
-          throw new Error(body || `HTTP ${response.status}`);
+        const data = await response.json();
+        if (response.status === 202) {
+          if (!stopped) setStreamError("");
+          return;
         }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (!stopped) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            try {
-              const parsed = JSON.parse(trimmed);
-              setSnapshot(parsed);
-              setStreamError("");
-            } catch {
-              // Ignore non-JSON framing data.
-            }
-          }
+        if (!response.ok) {
+          throw new Error(data.error || `HTTP ${response.status}`);
+        }
+        if (!stopped) {
+          setSnapshot(data.snapshot || null);
+          setStreamError("");
         }
       } catch (error) {
-        if (!stopped && error.name !== "AbortError") {
-          setStreamError(error.message || "Cloud stream disconnected");
+        if (!stopped) {
+          setStreamError(error.message || "Cloud state unavailable");
         }
       }
     }
 
-    connect();
+    loadCloudState();
+    const timer = setInterval(loadCloudState, 15000);
     return () => {
       stopped = true;
-      controller.abort();
+      clearInterval(timer);
     };
   }, [runId]);
 

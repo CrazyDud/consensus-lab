@@ -7,6 +7,7 @@ const FEE_PCT = 0.15;
 const SLIP_PCT = 0.03;
 const FUNDING_PROXY_RATE = 0.0001;
 const FUNDING_INTERVAL_MS = 8 * 60 * 60 * 1000;
+const GPT_ADVICE_URL = "https://consensus-lab-mu.vercel.app/gpt-latest.json";
 
 const CONFIGS = {
   strictLong: {
@@ -93,6 +94,18 @@ const CONFIGS = {
     targetPct: 1.1,
     maxBars: 60,
   },
+  intelligence: {
+    label: "Consensus Intelligence",
+    timeframe: "1m + 5m + GPT supervisor",
+    signal: "intelligence",
+    allowShort: true,
+    leverageMode: "adaptive-capped",
+    leverage: 1,
+    sizePct: 10,
+    stopPct: 0.7,
+    targetPct: 1.2,
+    maxBars: 90,
+  },
 };
 
 function makePortfolio(config) {
@@ -117,6 +130,7 @@ function initialState() {
   return {
     portfolios,
     buyHold: null,
+    intelligenceLearning: { pending: [], resolved: 0, correct: 0, lastForecastBar: 0 },
     startedAt: Date.now(),
     tickCount: 0,
   };
@@ -159,10 +173,10 @@ function applyFunding(portfolio, now) {
   }
 }
 
-function openPosition(portfolio, side, price, barTime, leverage, now) {
+function openPosition(portfolio, side, price, barTime, leverage, now, sizeMultiplier = 1) {
   const feeRate = FEE_PCT / 100;
   const slipPct = SLIP_PCT;
-  let margin = portfolio.cash * portfolio.config.sizePct / 100;
+  let margin = portfolio.cash * portfolio.config.sizePct / 100 * Math.max(0, Math.min(1, sizeMultiplier));
   const maxMargin = portfolio.cash / (1 + leverage * feeRate);
   margin = Math.min(margin, maxMargin);
 
@@ -275,7 +289,7 @@ function summarizePortfolio(portfolio, price) {
   };
 }
 
-function processPortfolio(portfolio, signal, price, latestBar, barSeconds, now, forcedLeverage = null) {
+function processPortfolio(portfolio, signal, price, latestBar, barSeconds, now, forcedLeverage = null, sizeMultiplier = 1) {
   applyFunding(portfolio, now);
   if (maybeLiquidate(portfolio, price, now)) {
     updateRisk(portfolio, price);
@@ -300,7 +314,7 @@ function processPortfolio(portfolio, signal, price, latestBar, barSeconds, now, 
     const allowed = direction === "long" || (direction === "short" && portfolio.config.allowShort);
     if (allowed) {
       const leverage = forcedLeverage || portfolio.config.leverage || 1;
-      openPosition(portfolio, direction, price, latestBar.t, leverage, now);
+      openPosition(portfolio, direction, price, latestBar.t, leverage, now, sizeMultiplier);
     }
     portfolio.lastDecisionBar = latestBar.t;
   }
@@ -309,15 +323,78 @@ function processPortfolio(portfolio, signal, price, latestBar, barSeconds, now, 
   updateRisk(portfolio, price);
 }
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+async function loadGptAdvice() {
+  try {
+    const response = await fetch(GPT_ADVICE_URL + "?t=" + Date.now(), { cache: "no-store" });
+    if (!response.ok) throw new Error("GPT advice unavailable");
+    const advice = await response.json();
+    const age = Date.now() - Date.parse(advice.updatedAt || 0);
+    if (!Number.isFinite(age) || age > 3 * 60 * 60 * 1000) throw new Error("GPT advice stale");
+    return advice;
+  } catch {
+    return {
+      action: "neutral",
+      allowedDirections: ["long", "short"],
+      riskMultiplier: 1,
+      maxLeverage: 3,
+      minConfidence: 0.58,
+      fallback: true,
+      reason: "Neutral fallback supervisor policy.",
+    };
+  }
+}
+
+function resolveIntelligenceForecasts(state, price, now) {
+  const keep = [];
+  for (const item of state.intelligenceLearning.pending) {
+    if (item.dueAt > now) {
+      keep.push(item);
+      continue;
+    }
+    const actualLong = price > item.price;
+    if ((item.direction === "long") === actualLong) state.intelligenceLearning.correct += 1;
+    state.intelligenceLearning.resolved += 1;
+  }
+  state.intelligenceLearning.pending = keep;
+}
+
+function intelligenceEvaluation(portfolio, learning, price, buyHoldEquity) {
+  const summary = summarizePortfolio(portfolio, price);
+  const accuracy = learning.resolved ? learning.correct / learning.resolved : null;
+  const enough = summary.closedTrades >= 20 && learning.resolved >= 100;
+  const promising = enough &&
+    summary.returnPct > 0 &&
+    summary.equity > buyHoldEquity &&
+    summary.maxDrawdownPct < 8 &&
+    accuracy !== null && accuracy > 0.52 &&
+    summary.profitFactor !== null && summary.profitFactor > 1.15;
+
+  return {
+    stage: !enough ? "COLLECTING" : (summary.closedTrades >= 50 && learning.resolved >= 250 ? "MEANINGFUL" : "PRELIMINARY"),
+    verdict: !enough ? "Not enough evidence yet" : (promising ? "Promising candidate edge" : "Not yet showing a convincing edge"),
+    nextGate: summary.closedTrades < 20 || learning.resolved < 100
+      ? "20 closed trades + 100 resolved 15-minute forecasts"
+      : summary.closedTrades < 50 || learning.resolved < 250
+        ? "50 closed trades + 250 resolved forecasts"
+        : "100 closed trades + multiple market regimes",
+    directionalAccuracyPct: accuracy === null ? null : accuracy * 100,
+  };
+}
+
 export async function compareTick(previousState) {
   "use step";
 
   const state = structuredClone(previousState);
   const now = Date.now();
 
-  const [m1, m5] = await Promise.all([
+  const [m1, m5, gptAdvice] = await Promise.all([
     getMultiMarketData(60),
     getMultiMarketData(300),
+    loadGptAdvice(),
   ]);
 
   const oneMinuteBucket = Math.floor(now / 1000 / 60) * 60;
@@ -331,6 +408,41 @@ export async function compareTick(previousState) {
   const fast = fastSignal(c1, 60);
   const adaptive = adaptiveLeverageSignal(c1, c5);
 
+  resolveIntelligenceForecasts(state, price, now);
+  const rawConfidence = clamp(0.5 + Math.abs(Number(adaptive.score || 0)) * 0.12, 0.5, 0.85);
+  const minConfidence = Math.max(0.58, Number(gptAdvice.minConfidence || 0.58));
+  let intelligenceDirection = rawConfidence >= minConfidence ? adaptive.direction : "flat";
+  const allowedDirections = Array.isArray(gptAdvice.allowedDirections) ? gptAdvice.allowedDirections : ["long", "short"];
+  if (!allowedDirections.includes(intelligenceDirection) || gptAdvice.action === "risk_off") intelligenceDirection = "flat";
+  const intelligenceLeverage = Math.min(clamp(Number(adaptive.leverage || 1), 1, 3), clamp(Number(gptAdvice.maxLeverage || 3), 1, 3));
+  let intelligenceRisk = clamp(Number(gptAdvice.riskMultiplier ?? 1), 0, 1);
+  if (!adaptive.confirmed && intelligenceDirection !== "flat") intelligenceRisk *= 0.7;
+  if (state.portfolios.intelligence.maxDD >= 3) intelligenceRisk *= 0.5;
+  if (state.portfolios.intelligence.maxDD >= 5) intelligenceRisk = 0;
+
+  const intelligenceSignal = {
+    ...adaptive,
+    direction: intelligenceDirection,
+    decision: intelligenceDirection === "flat" ? "NO TRADE" : intelligenceDirection.toUpperCase() + " x" + intelligenceLeverage,
+    confidence: rawConfidence,
+    leverage: intelligenceLeverage,
+    riskMultiplier: intelligenceRisk,
+    supervisor: gptAdvice,
+  };
+
+  if (c1.at(-1).t !== state.intelligenceLearning.lastForecastBar) {
+    if (intelligenceDirection !== "flat") {
+      state.intelligenceLearning.pending.push({
+        dueAt: now + 15 * 60 * 1000,
+        direction: intelligenceDirection,
+        price,
+        confidence: rawConfidence,
+      });
+      state.intelligenceLearning.pending = state.intelligenceLearning.pending.slice(-500);
+    }
+    state.intelligenceLearning.lastForecastBar = c1.at(-1).t;
+  }
+
   const strictLongSignal = { ...strict, direction: strict.direction === "long" ? "long" : "flat" };
 
   processPortfolio(state.portfolios.strictLong, strictLongSignal, price, c5.at(-1), 300, now, 1);
@@ -340,6 +452,23 @@ export async function compareTick(previousState) {
   processPortfolio(state.portfolios.fastX3, fast, price, c1.at(-1), 60, now, 3);
   processPortfolio(state.portfolios.fastX5, fast, price, c1.at(-1), 60, now, 5);
   processPortfolio(state.portfolios.adaptive, adaptive, price, c1.at(-1), 60, now, adaptive.leverage || 1);
+
+  if (state.portfolios.intelligence.position) {
+    const currentSide = state.portfolios.intelligence.position.side;
+    if (gptAdvice.action === "risk_off" || !allowedDirections.includes(currentSide)) {
+      closePosition(state.portfolios.intelligence, price, "GPT supervisor risk filter", now);
+    }
+  }
+  processPortfolio(
+    state.portfolios.intelligence,
+    intelligenceSignal,
+    price,
+    c1.at(-1),
+    60,
+    now,
+    intelligenceLeverage,
+    intelligenceRisk
+  );
 
   if (!state.buyHold) {
     const fee = START_CASH * (FEE_PCT / 100);
@@ -358,6 +487,12 @@ export async function compareTick(previousState) {
   }
 
   const buyHoldEquity = state.buyHold.qty * price * (1 - FEE_PCT / 100);
+  const intelligenceEvaluationResult = intelligenceEvaluation(
+    state.portfolios.intelligence,
+    state.intelligenceLearning,
+    price,
+    buyHoldEquity
+  );
   const snapshot = {
     status: "running",
     mode: "comparison-cloud-paper",
@@ -374,6 +509,24 @@ export async function compareTick(previousState) {
       latest5mBar: c5.at(-1).t,
     },
     variants,
+    intelligence: {
+      gptAdvice,
+      learning: {
+        resolvedForecasts: state.intelligenceLearning.resolved,
+        pendingForecasts: state.intelligenceLearning.pending.length,
+        directionalAccuracyPct: state.intelligenceLearning.resolved
+          ? (state.intelligenceLearning.correct / state.intelligenceLearning.resolved) * 100
+          : null,
+      },
+      evaluation: intelligenceEvaluationResult,
+      safety: {
+        realOrders: false,
+        maxLeverage: 3,
+        gptCanIncreaseRisk: false,
+        drawdownThrottlePct: 3,
+        newEntriesStopPct: 5,
+      },
+    },
     baselines: {
       buyHold: {
         label: "Buy & Hold",

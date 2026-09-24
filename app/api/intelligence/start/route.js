@@ -1,1 +1,27 @@
-import { start } from "workflow/api";\nimport { intelligenceEngine } from "../../../../workflows/intelligence-engine.js";\n\nexport const dynamic = "force-dynamic";\n\nasync function launch() {\n  const run = await start(intelligenceEngine);\n  return Response.json({ ok:true, runId:run.runId, mode:"intelligence-shadow", checkIntervalSeconds:60, note:"Shadow paper research only. No real-order execution." });\n}\n\nexport async function POST() { return launch(); }\nexport async function GET(request) {\n  const url = new URL(request.url);\n  if (url.searchParams.get("bootstrap") !== "paper-only") return Response.json({ error:"Use POST to start intelligence." }, { status:405 });\n  return launch();\n}
+import { start } from "workflow/api";
+import { intelligenceEngine } from "../../../../workflows/intelligence-engine.js";
+
+export const dynamic = "force-dynamic";
+
+async function launch() {
+  const run = await start(intelligenceEngine);
+  return Response.json({
+    ok: true,
+    runId: run.runId,
+    mode: "intelligence-shadow",
+    checkIntervalSeconds: 60,
+    note: "Shadow paper research only. No real-order execution."
+  });
+}
+
+export async function POST() {
+  return launch();
+}
+
+export async function GET(request) {
+  const url = new URL(request.url);
+  if (url.searchParams.get("bootstrap") !== "paper-only") {
+    return Response.json({ error: "Use POST to start intelligence." }, { status: 405 });
+  }
+  return launch();
+}

@@ -1,10 +1,10 @@
 import { start } from "workflow/api";
-import { intelligenceEngine } from "../../../../workflows/intelligence-engine.js";
+import { intelligenceLiteEngine } from "../../../../workflows/intelligence-lite.js";
 
 export const dynamic = "force-dynamic";
 
 async function launch() {
-  const run = await start(intelligenceEngine);
+  const run = await start(intelligenceLiteEngine);
   return Response.json({
     ok: true,
     runId: run.runId,

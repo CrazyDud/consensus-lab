@@ -1,12 +1,15 @@
 {
   "version": 1,
-  "updatedAt": "2026-09-24T20:45:00Z",
-  "source": "bootstrap",
+  "updatedAt": "2026-09-24T21:11:12.575Z",
+  "source": "gpt-manual-supervisor-bootstrap",
   "action": "neutral",
-  "allowedDirections": ["long", "short"],
-  "riskMultiplier": 1.0,
-  "maxLeverage": 3,
-  "minConfidence": 0.58,
-  "regimeNote": "Initial neutral supervisory policy. Quant engine remains primary.",
-  "reason": "No GPT supervisory review has been applied yet."
+  "allowedDirections": [
+    "long",
+    "short"
+  ],
+  "riskMultiplier": 0.75,
+  "maxLeverage": 2,
+  "minConfidence": 0.62,
+  "regimeNote": "Early shadow phase with insufficient outcome history; keep both directions available but reduce exposure while collecting evidence.",
+  "reason": "No validated edge yet. Use a higher confidence floor, reduced paper risk, and cap leverage at x2 until the intelligence layer accumulates forecast and trade evidence."
 }

@@ -220,6 +220,18 @@ export default function Home() {
             </div>
           </div>
         </a>
+        <a href="/intelligence" style={{ textDecoration: "none", color: "inherit" }}>
+          <div className="card" style={{ marginBottom: 12, borderColor: "#45608a" }}>
+            <div className="row">
+              <div>
+                <div className="label">New intelligence layer</div>
+                <div className="mid">Open Consensus Intelligence →</div>
+                <div className="small">1-minute quant decisions with GPT supervisory risk policy and evidence gates.</div>
+              </div>
+              <div className="pill">shadow mode</div>
+            </div>
+          </div>
+        </a>
         <div className={`cloudBanner ${engineClass}`}>
           <div>
             <div className="cloudTitle">{engineTitle}</div>

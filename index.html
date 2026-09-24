@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b1117"><title>Consensus Lab Live</title>
+<style>
+:root{--bg:#091016;--card:#111a22;--line:#24323f;--text:#edf3f6;--muted:#8fa0ad;--green:#8ce0bd;--red:#ff9aa4;--amber:#f3d38a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding-bottom:78px}
+header{position:sticky;top:0;z-index:5;background:#091016ee;border-bottom:1px solid var(--line);padding:14px 16px}.brand{font-size:20px;font-weight:800}.muted,.small{color:var(--muted)}.small{font-size:12px;line-height:1.45}.wrap{max-width:920px;margin:auto;padding:14px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px}.wide{grid-column:1/-1}.label{font-size:12px;color:var(--muted)}.big{font-size:28px;font-weight:800;margin-top:5px}.mid{font-size:18px;font-weight:800}.pos{color:var(--green)}.neg{color:var(--red)}.amber{color:var(--amber)}
+.row{display:flex;justify-content:space-between;gap:12px;align-items:center}.pill{font-size:11px;border:1px solid #31414f;border-radius:999px;padding:5px 8px;color:#b7c6d0}
+button{border:0;border-radius:14px;padding:12px 14px;font-weight:800;background:#90e2bf;color:#092018}button.secondary{background:#182530;color:#dce7ec;border:1px solid #30414e}button.danger{background:#3b1c23;color:#ffb2bb;border:1px solid #6a2c39}button:disabled{opacity:.45}
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}canvas{width:100%;height:210px;background:#0b141b;border-radius:14px;margin-top:12px}
+.models{display:grid;grid-template-columns:1fr 1fr;gap:9px}.model{border:1px solid #263744;background:#0e171f;border-radius:14px;padding:11px}.mvote{font-weight:800;margin-top:5px}.bar{height:5px;background:#263541;border-radius:5px;margin-top:8px;overflow:hidden}.bar i{display:block;height:100%;background:#94dcbf}
+.section{display:none}.section.active{display:block}nav{position:fixed;bottom:0;left:0;right:0;background:#0d161e;border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(4,1fr)}nav button{background:none;color:#8fa0ad;border-radius:0;font-size:11px}nav button.active{color:var(--green)}
+input{width:100%;background:#0c151d;color:white;border:1px solid #2c3d4a;border-radius:12px;padding:11px}.settings label{display:block;margin:10px 0 5px;font-size:12px;color:#aab8c1}
+table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;padding:8px 5px;border-bottom:1px solid #22313d}
+@media(min-width:700px){.grid{grid-template-columns:repeat(4,1fr)}.models{grid-template-columns:repeat(5,1fr)}}
+</style></head>
+<body>
+<header><div class="brand">Consensus Lab <span class="pos">LIVE v0.3</span></div><div class="small">Real public BTC data · paper trading only · no exchange credentials</div></header>
+<div class="wrap">
+<section id="overview" class="section active">
+<div class="grid">
+<div class="card"><div class="label">Paper equity</div><div id="equity" class="big">$1,000.00</div></div>
+<div class="card"><div class="label">Net return</div><div id="ret" class="big">0.00%</div></div>
+<div class="card"><div class="label">Max drawdown</div><div id="dd" class="big amber">0.00%</div></div>
+<div class="card"><div class="label">Closed trades</div><div id="tc" class="big">0</div><div id="wl" class="small">0 wins · 0 losses</div></div>
+<div class="card wide"><div class="row"><div><div class="label">Bitcoin BTC / USD</div><div id="price" class="big">—</div></div><div id="status" class="pill">CONNECTING</div></div><div id="move" class="small">Waiting for market data…</div><canvas id="chart" width="840" height="260"></canvas></div>
+<div class="card wide"><div class="row"><div><div class="label">Consensus decision</div><div id="decision" class="mid">WARMING UP</div></div><div id="agree" class="pill">0 bull · 0 bear · 10 neutral</div></div><div id="reason" class="small" style="margin-top:7px">Need market history.</div><div class="controls"><button id="arm">Arm paper entries</button><button id="pause" class="secondary">Pause entries</button><button id="close" class="danger">Close paper position</button></div></div>
+<div class="card wide"><div class="label">Current paper position</div><div id="position" class="mid">FLAT</div><div id="posdetail" class="small">No open simulated position.</div></div>
+</div></section>
+
+<section id="signals" class="section"><div class="card"><div class="row"><div><div class="label">Signal ensemble</div><div class="mid">10 transparent rule families</div></div><div id="sigs" class="pill">—</div></div><div class="small" style="margin:7px 0 12px">Votes are heuristics, not calibrated probabilities.</div><div id="models" class="models"></div></div></section>
+
+<section id="journal" class="section"><div class="card"><div class="row"><div><div class="label">Paper journal</div><div class="mid">Closed simulated trades</div></div><button id="export" class="secondary">Export JSON</button></div><div style="overflow:auto;margin-top:10px"><table><thead><tr><th>Time</th><th>Entry</th><th>Exit</th><th>P/L</th><th>Reason</th></tr></thead><tbody id="tbody"></tbody></table></div></div></section>
+
+<section id="settings" class="section"><div class="card settings"><div class="mid">Risk settings</div>
+<label>Required bullish models (10)</label><input id="threshold" type="number" min="5" max="10">
+<label>Position size (% cash)</label><input id="sizePct" type="number" min="1" max="100">
+<label>Stop loss (%)</label><input id="stopPct" type="number" min=".1" max="10" step=".1">
+<label>Profit target (%)</label><input id="targetPct" type="number" min=".1" max="20" step=".1">
+<label>Maximum hold (5m bars)</label><input id="maxBars" type="number" min="1" max="288">
+<label>Fee per side (%)</label><input id="feePct" type="number" min="0" max="2" step=".01">
+<label>Slippage per side (%)</label><input id="slipPct" type="number" min="0" max="2" step=".01">
+<div class="controls"><button id="saveSettings">Save</button><button id="reset" class="danger">Reset experiment</button></div></div></section>
+</div>
+<nav><button data-tab="overview" class="active">Overview</button><button data-tab="signals">Signals</button><button data-tab="journal">Journal</button><button data-tab="settings">Settings</button></nav>
+
+<script>
+const KEY='consensusLabV03',defaults={cash:1000,startCash:1000,armed:false,threshold:8,sizePct:20,stopPct:1.2,targetPct:2,maxBars:24,feePct:.15,slipPct:.03,position:null,trades:[],peak:1000,maxDD:0,lastEntryBar:0};
+let state=Object.assign({},defaults,JSON.parse(localStorage.getItem(KEY)||'{}')),candles=[],ticker=null,models=[];
+const $=id=>document.getElementById(id),fmt=n=>Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const save=()=>localStorage.setItem(KEY,JSON.stringify(state));
+function sma(a,n){if(a.length<n)return null;return a.slice(-n).reduce((s,x)=>s+x,0)/n}
+function ema(a,n){if(a.length<n)return null;let k=2/(n+1),e=a[0];for(let i=1;i<a.length;i++)e=a[i]*k+e*(1-k);return e}
+function std(a,n){if(a.length<n)return null;let x=a.slice(-n),m=x.reduce((s,v)=>s+v,0)/n;return Math.sqrt(x.reduce((s,v)=>s+(v-m)**2,0)/n)}
+function rsi(a,n=14){if(a.length<n+1)return null;let g=0,l=0;for(let i=a.length-n;i<a.length;i++){let d=a[i]-a[i-1];d>0?g+=d:l-=d}if(!l)return 100;let rs=(g/n)/(l/n);return 100-100/(1+rs)}
+function M(name,vote,strength,desc){return{name,vote,strength:Math.max(0,Math.min(1,strength||0)),desc}}
+function compute(){
+ if(candles.length<70)return[];
+ let c=candles.map(x=>x.c),h=candles.map(x=>x.h),l=candles.map(x=>x.l),v=candles.map(x=>x.v),p=c.at(-1);
+ let e9=ema(c.slice(-80),9),e21=ema(c.slice(-80),21),s20=sma(c,20),s50=sma(c,50),R=rsi(c),roc=(p/c.at(-13)-1)*100,sd=std(c,20),upper=s20+2*sd,lower=s20-2*sd;
+ let hi20=Math.max(...h.slice(-21,-1)),lo20=Math.min(...l.slice(-21,-1)),volRatio=v.at(-1)/(sma(v,20)||1);
+ let rr=candles.slice(-30),vwap=rr.reduce((s,x)=>s+((x.h+x.l+x.c)/3)*x.v,0)/rr.reduce((s,x)=>s+x.v,0);
+ let macd=ema(c.slice(-80),12)-ema(c.slice(-80),26),mp=ema(c.slice(-81,-1),12)-ema(c.slice(-81,-1),26),bull=candles.slice(-6).filter(x=>x.c>x.o).length;
+ return[
+ M('EMA trend',e9>e21?'bull':'bear',Math.abs(e9-e21)/p*150,'EMA9 vs EMA21'),
+ M('Session trend',s20>s50?'bull':'bear',Math.abs(s20-s50)/p*100,'SMA20 vs SMA50'),
+ M('Momentum 1h',roc>.18?'bull':roc<-.18?'bear':'neutral',Math.abs(roc)/1.2,'12-bar ROC '+roc.toFixed(2)+'%'),
+ M('RSI regime',R>54&&R<72?'bull':R<46&&R>28?'bear':'neutral',Math.abs(R-50)/25,'RSI '+R.toFixed(1)),
+ M('Breakout',p>hi20?'bull':p<lo20?'bear':'neutral',.9,'Price vs prior 20-bar range'),
+ M('VWAP pressure',p>vwap*1.001?'bull':p<vwap*.999?'bear':'neutral',Math.abs(p-vwap)/p*250,'Price vs rolling VWAP'),
+ M('MACD impulse',macd>0&&macd>mp?'bull':macd<0&&macd<mp?'bear':'neutral',Math.abs(macd)/p*500,'MACD '+macd.toFixed(2)),
+ M('Bollinger reversion',p<lower?'bull':p>upper?'bear':'neutral',.75,'20-bar ±2σ'),
+ M('Volume confirm',volRatio>1.25?(candles.at(-1).c>candles.at(-1).o?'bull':'bear'):'neutral',(volRatio-1)/1.5,'Volume '+volRatio.toFixed(2)+'× avg'),
+ M('Candle structure',bull>=4?'bull':bull<=2?'bear':'neutral',Math.abs(bull-3)/3,bull+'/6 green')
+ ]}
+function consensus(){models=compute();let b=models.filter(x=>x.vote==='bull').length,s=models.filter(x=>x.vote==='bear').length,n=10-b-s,d='NO TRADE',r='Consensus below threshold.';if(models.length<10){d='WARMING UP';r='Need at least 70 real 5-minute candles.'}else if(b>=state.threshold&&b>=s+3){d='LONG SETUP';r=b+'/10 bullish; threshold '+state.threshold+'.'}else if(s>=state.threshold){d='RISK-OFF';r=s+'/10 bearish; long-only system.'}return{b,s,n,d,r}}
+function equity(p){return state.position?state.cash+state.position.qty*p*(1-state.feePct/100):state.cash}
+function risk(p){let e=equity(p);state.peak=Math.max(state.peak||state.startCash,e);state.maxDD=Math.max(state.maxDD||0,(state.peak-e)/state.peak*100)}
+function openPaper(p,bt){if(!state.armed||state.position||bt===state.lastEntryBar)return;let entry=p*(1+state.slipPct/100),alloc=state.cash*state.sizePct/100,fee=alloc*state.feePct/100,qty=alloc/entry;state.cash-=alloc+fee;state.position={entry,qty,entryBar:bt,stop:entry*(1-state.stopPct/100),target:entry*(1+state.targetPct/100),entryFee:fee};state.lastEntryBar=bt;save()}
+function closePaper(p,why){if(!state.position)return;let x=state.position,exit=p*(1-state.slipPct/100),gross=x.qty*exit,fee=gross*state.feePct/100,proceeds=gross-fee,pnl=proceeds-(x.qty*x.entry+x.entryFee);state.cash+=proceeds;state.trades.unshift({time:Date.now(),entry:x.entry,exit,pnl,fees:x.entryFee+fee,why});state.position=null;save()}
+function trade(){if(!ticker||candles.length<70)return;let p=ticker.price,c=consensus(),bar=candles.at(-1),held=state.position?Math.max(0,Math.floor((bar.t-state.position.entryBar)/300)):0;if(state.position){if(p<=state.position.stop)closePaper(p,'Stop loss');else if(p>=state.position.target)closePaper(p,'Profit target');else if(held>=state.maxBars)closePaper(p,'Maximum hold');else if(c.s>=6)closePaper(p,'Bearish consensus')}else if(c.d==='LONG SETUP')openPaper(p,bar.t);risk(p);save()}
+async function fetchMarket(){try{let r=await fetch('/api/market',{cache:'no-store'});if(!r.ok)throw Error((await r.json()).error||'HTTP '+r.status);let x=await r.json();candles=x.candles.map(a=>({t:+a[0],l:+a[1],h:+a[2],o:+a[3],c:+a[4],v:+a[5]})).sort((a,b)=>a.t-b.t);ticker={price:+x.ticker.price,time:Date.parse(x.ticker.time)||Date.now(),provider:x.provider};trade();render(true)}catch(e){render(false,e.message)}}
+function draw(){let cv=$('chart'),ctx=cv.getContext('2d'),x=candles.slice(-80),W=cv.width,H=cv.height;ctx.clearRect(0,0,W,H);if(x.length<2)return;let lo=Math.min(...x.map(z=>z.l)),hi=Math.max(...x.map(z=>z.h)),pad=(hi-lo)*.12||1;lo-=pad;hi+=pad;let y=v=>10+(hi-v)/(hi-lo)*(H-20);x.forEach((z,i)=>{let px=10+i*(W-20)/(x.length-1);ctx.strokeStyle=z.c>=z.o?'#8ce0bd':'#ff9aa4';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(px,y(z.h));ctx.lineTo(px,y(z.l));ctx.stroke();ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(px,y(z.o));ctx.lineTo(px,y(z.c));ctx.stroke()})}
+function render(ok=true,err=''){let p=ticker?.price||candles.at(-1)?.c||0,e=p?equity(p):state.cash,ret=(e/state.startCash-1)*100,w=state.trades.filter(t=>t.pnl>0).length,l=state.trades.filter(t=>t.pnl<=0).length,c=consensus();$('equity').textContent='$'+fmt(e);$('ret').textContent=(ret>=0?'+':'')+ret.toFixed(2)+'%';$('ret').className='big '+(ret>0?'pos':ret<0?'neg':'');$('dd').textContent=(state.maxDD||0).toFixed(2)+'%';$('tc').textContent=state.trades.length;$('wl').textContent=w+' wins · '+l+' losses';$('price').textContent=p?'$'+fmt(p):'—';$('status').textContent=ok&&ticker?'LIVE '+(ticker.provider||'').toUpperCase():'DATA ERROR';$('status').className='pill '+(ok&&ticker?'pos':'neg');if(candles.length>12&&p){let mv=(p/candles.at(-13).c-1)*100;$('move').textContent='1h move '+(mv>=0?'+':'')+mv.toFixed(2)+'% · '+(ticker.provider||'public market').toUpperCase()}else $('move').textContent=err||'Waiting…';$('decision').textContent=c.d;$('decision').className='mid '+(c.d==='LONG SETUP'?'pos':c.d==='RISK-OFF'?'neg':'');$('agree').textContent=c.b+' bull · '+c.s+' bear · '+c.n+' neutral';$('reason').textContent=(err?'Market-data issue: '+err+'. ':'')+c.r;$('arm').disabled=state.armed;$('pause').disabled=!state.armed;$('position').textContent=state.position?'LONG '+state.position.qty.toFixed(6)+' BTC':'FLAT';$('posdetail').textContent=state.position?'Entry $'+fmt(state.position.entry)+' · Stop $'+fmt(state.position.stop)+' · Target $'+fmt(state.position.target):'No open simulated position.';$('sigs').textContent=models.length?c.b+' / '+c.s+' / '+c.n:'warming up';$('models').innerHTML=models.map(m=>'<div class="model"><div class="small">'+m.name+'</div><div class="mvote '+(m.vote==='bull'?'pos':m.vote==='bear'?'neg':'')+'">'+m.vote.toUpperCase()+'</div><div class="bar"><i style="width:'+Math.round(m.strength*100)+'%"></i></div><div class="small">'+m.desc+'</div></div>').join('');$('tbody').innerHTML=state.trades.slice(0,50).map(t=>'<tr><td>'+new Date(t.time).toLocaleString()+'</td><td>$'+fmt(t.entry)+'</td><td>$'+fmt(t.exit)+'</td><td class="'+(t.pnl>=0?'pos':'neg')+'">'+(t.pnl>=0?'+':'')+'$'+fmt(t.pnl)+'</td><td>'+t.why+'</td></tr>').join('')||'<tr><td colspan="5" class="small">No trades yet.</td></tr>';draw()}
+['threshold','sizePct','stopPct','targetPct','maxBars','feePct','slipPct'].forEach(k=>$(k).value=state[k]);
+$('arm').onclick=()=>{state.armed=true;save();render()};$('pause').onclick=()=>{state.armed=false;save();render()};$('close').onclick=()=>{if(ticker)closePaper(ticker.price,'Manual close');state.armed=false;save();render()};
+$('saveSettings').onclick=()=>{if(state.position||state.trades.length){alert('Reset the experiment before changing assumptions.');return}['threshold','sizePct','stopPct','targetPct','maxBars','feePct','slipPct'].forEach(k=>state[k]=+$(k).value);save();render()};
+$('reset').onclick=()=>{if(confirm('Reset local paper history?')){state=Object.assign({},defaults);save();location.reload()}};
+$('export').onclick=()=>{let b=new Blob([JSON.stringify({exportedAt:new Date().toISOString(),state},null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='consensus-lab-paper.json';a.click()};
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));$(b.dataset.tab).classList.add('active')});
+render();fetchMarket();setInterval(fetchMarket,15000);
+</script></body></html>

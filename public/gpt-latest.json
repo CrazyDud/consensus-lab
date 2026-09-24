@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "updatedAt": "2026-09-24T20:45:00Z",
+  "source": "bootstrap",
+  "action": "neutral",
+  "allowedDirections": ["long", "short"],
+  "riskMultiplier": 1.0,
+  "maxLeverage": 3,
+  "minConfidence": 0.58,
+  "regimeNote": "Initial neutral supervisory policy. Quant engine remains primary.",
+  "reason": "No GPT supervisory review has been applied yet."
+}

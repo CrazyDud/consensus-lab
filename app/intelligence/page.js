@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-const DEFAULT_RUN_ID = "";
+const DEFAULT_RUN_ID = "wrun_01M3AM017EFMX2AZ3WN6XSXJCK";
 
 function money(value) {
   if (!Number.isFinite(Number(value))) return "—";

@@ -7,7 +7,6 @@ const FEE_PCT = 0.15;
 const SLIP_PCT = 0.03;
 const FUNDING_PROXY_RATE = 0.0001;
 const FUNDING_INTERVAL_MS = 8 * 60 * 60 * 1000;
-const GPT_ADVICE_URL = "https://consensus-lab-mu.vercel.app/gpt-latest.json";
 
 const CONFIGS = {
   strictLong: {
@@ -327,25 +326,89 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-async function loadGptAdvice() {
-  try {
-    const response = await fetch(GPT_ADVICE_URL + "?t=" + Date.now(), { cache: "no-store" });
-    if (!response.ok) throw new Error("GPT advice unavailable");
-    const advice = await response.json();
-    const age = Date.now() - Date.parse(advice.updatedAt || 0);
-    if (!Number.isFinite(age) || age > 3 * 60 * 60 * 1000) throw new Error("GPT advice stale");
-    return advice;
-  } catch {
+function fixedSupervisorPolicy(state, now, latest1mBar, latest5mBar, price) {
+  const portfolio = state.portfolios.intelligence;
+  const learning = state.intelligenceLearning;
+  const resolved = Number(learning.resolved || 0);
+  const accuracy = resolved > 0 ? Number(learning.correct || 0) / resolved : null;
+  const trades = portfolio.trades || [];
+  const wins = trades.filter((t) => Number(t.pnl) > 0).length;
+  const winRate = trades.length ? wins / trades.length : null;
+  const grossWin = trades.filter((t) => Number(t.pnl) > 0).reduce((s, t) => s + Number(t.pnl || 0), 0);
+  const grossLoss = Math.abs(trades.filter((t) => Number(t.pnl) < 0).reduce((s, t) => s + Number(t.pnl || 0), 0));
+  const profitFactor = grossLoss > 0 ? grossWin / grossLoss : null;
+  const equity = portfolioEquity(portfolio, price);
+  const returnPct = (equity / START_CASH - 1) * 100;
+  const age1mMs = now - Number(latest1mBar || 0) * 1000;
+  const age5mMs = now - Number(latest5mBar || 0) * 1000;
+
+  const base = {
+    version: 1,
+    updatedAt: new Date(now).toISOString(),
+    source: "repo-fixed-supervisor",
+    action: "neutral",
+    allowedDirections: ["long", "short"],
+    riskMultiplier: 0.75,
+    maxLeverage: 2,
+    minConfidence: 0.62,
+    regimeNote: "Conservative paper-only collection mode.",
+    reason: "Fixed supervisor baseline: reduced sizing, x2 leverage cap, and elevated confidence floor while evidence accumulates.",
+  };
+
+  const stale = !Number.isFinite(age1mMs) || !Number.isFinite(age5mMs) || age1mMs > 3 * 60 * 1000 || age5mMs > 10 * 60 * 1000;
+  if (stale) {
     return {
-      action: "neutral",
-      allowedDirections: ["long", "short"],
-      riskMultiplier: 1,
-      maxLeverage: 3,
-      minConfidence: 0.58,
-      fallback: true,
-      reason: "Neutral fallback supervisor policy.",
+      ...base,
+      action: "risk_off",
+      allowedDirections: [],
+      riskMultiplier: 0,
+      maxLeverage: 1,
+      minConfidence: 0.70,
+      regimeNote: "Market data is stale or invalid.",
+      reason: "Hard risk-off: the fixed supervisor will not permit new paper positions while market inputs are stale.",
     };
   }
+
+  if (Number(portfolio.maxDD || 0) >= 3) {
+    return {
+      ...base,
+      action: "risk_off",
+      allowedDirections: [],
+      riskMultiplier: 0,
+      maxLeverage: 1,
+      minConfidence: 0.72,
+      regimeNote: "Consensus Intelligence drawdown reached the hard supervisory threshold.",
+      reason: "Hard risk-off at 3% max drawdown; new paper entries remain disabled until the run is reviewed or restarted.",
+    };
+  }
+
+  const weakForecastEvidence = resolved >= 50 && accuracy !== null && accuracy < 0.45;
+  const weakTradeEvidence = trades.length >= 10 && returnPct < -0.5 && winRate !== null && winRate < 0.25 &&
+    (profitFactor === null || profitFactor < 0.5);
+
+  if (weakForecastEvidence || weakTradeEvidence) {
+    return {
+      ...base,
+      riskMultiplier: 0.50,
+      maxLeverage: 1,
+      minConfidence: 0.68,
+      regimeNote: "Early evidence is weak; continue paper-only learning at reduced exposure.",
+      reason: "Caution tier: at least one broad-sample quality check is weak, so size is halved, leverage is capped at x1, and the confidence floor is raised without stopping data collection.",
+    };
+  }
+
+  if (Number(portfolio.maxDD || 0) >= 1.5) {
+    return {
+      ...base,
+      riskMultiplier: 0.35,
+      maxLeverage: 1,
+      minConfidence: 0.70,
+      regimeNote: "Drawdown is elevated but remains below the hard stop.",
+      reason: "Drawdown throttle: keep paper learning active with sharply reduced size, x1 leverage, and a higher confidence floor.",
+    };
+  }
+
+  return base;
 }
 
 function resolveIntelligenceForecasts(state, price, now) {
@@ -391,10 +454,9 @@ export async function compareTick(previousState) {
   const state = structuredClone(previousState);
   const now = Date.now();
 
-  const [m1, m5, gptAdvice] = await Promise.all([
+  const [m1, m5] = await Promise.all([
     getMultiMarketData(60),
     getMultiMarketData(300),
-    loadGptAdvice(),
   ]);
 
   const oneMinuteBucket = Math.floor(now / 1000 / 60) * 60;
@@ -404,6 +466,7 @@ export async function compareTick(previousState) {
   if (c1.length < 70 || c5.length < 70) throw new Error("Not enough closed candles");
 
   const price = Number(m1.ticker.price);
+  const gptAdvice = fixedSupervisorPolicy(state, now, c1.at(-1)?.t, c5.at(-1)?.t, price);
   const strict = strictSignal(c5, 8, 300);
   const fast = fastSignal(c1, 60);
   const adaptive = adaptiveLeverageSignal(c1, c5);

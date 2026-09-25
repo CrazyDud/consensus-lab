@@ -1,15 +1,15 @@
 {
   "version": 1,
-  "updatedAt": "2026-09-24T21:11:12.575Z",
-  "source": "gpt-manual-supervisor-bootstrap",
+  "updatedAt": "2026-09-25T07:39:36.650Z",
+  "source": "repo-fixed-supervisor-bootstrap",
   "action": "neutral",
   "allowedDirections": [
     "long",
     "short"
   ],
-  "riskMultiplier": 0.75,
-  "maxLeverage": 2,
-  "minConfidence": 0.62,
-  "regimeNote": "Early shadow phase with insufficient outcome history; keep both directions available but reduce exposure while collecting evidence.",
-  "reason": "No validated edge yet. Use a higher confidence floor, reduced paper risk, and cap leverage at x2 until the intelligence layer accumulates forecast and trade evidence."
+  "riskMultiplier": 0.5,
+  "maxLeverage": 1,
+  "minConfidence": 0.68,
+  "regimeNote": "Early evidence is weak; continue paper-only learning at reduced exposure.",
+  "reason": "Caution tier: 55 resolved forecasts are at 40% directional accuracy and Consensus Intelligence has 12 closed trades with weak early trade quality, so keep both directions available while halving size, capping leverage at x1, and raising the confidence floor."
 }

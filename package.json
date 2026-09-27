@@ -9,6 +9,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "ai": "^7.0.105",
     "next": "^16.0.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

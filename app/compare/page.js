@@ -26,6 +26,7 @@ function ago(ms) {
 export default function ComparePage() {
   const [runId, setRunId] = useState(DEFAULT_COMPARE_RUN_ID);
   const [snapshot, setSnapshot] = useState(null);
+  const [workflowStatus, setWorkflowStatus] = useState("unknown");
   const [error, setError] = useState("");
   const [, tick] = useState(0);
 
@@ -40,12 +41,17 @@ export default function ComparePage() {
 
     async function load() {
       try {
-        const response = await fetch("/api/compare/peek?runId=" + encodeURIComponent(runId), { cache: "no-store" });
+        const [response, statusResponse] = await Promise.all([
+          fetch("/api/compare/peek?runId=" + encodeURIComponent(runId), { cache: "no-store" }),
+          fetch("/api/compare/run-status?runId=" + encodeURIComponent(runId), { cache: "no-store" }),
+        ]);
         const data = await response.json();
+        const statusData = await statusResponse.json();
         if (response.status === 202) return;
         if (!response.ok) throw new Error(data.error || "Comparison state unavailable");
         if (!stopped) {
           setSnapshot(data.snapshot || null);
+          setWorkflowStatus(statusData.workflowStatus || "unknown");
           setError("");
         }
       } catch (e) {
@@ -69,7 +75,8 @@ export default function ComparePage() {
     return result.sort((a, b) => Number(b.returnPct || 0) - Number(a.returnPct || 0));
   }, [snapshot]);
 
-  const live = snapshot?.heartbeatAt && Date.now() - snapshot.heartbeatAt < 3 * 60 * 1000;
+  const live = workflowStatus === "running" && snapshot?.heartbeatAt && Date.now() - snapshot.heartbeatAt < 3 * 60 * 1000;
+  const archived = workflowStatus === "cancelled" || workflowStatus === "completed";
   const openPositions = rows.filter((r) => r.position).length;
 
   return (
@@ -83,11 +90,11 @@ export default function ComparePage() {
         <div className={"cloudBanner " + (error ? "bad" : live ? "" : "warn")}>
           <div>
             <div className="cloudTitle">
-              {error ? "COMPARISON ENGINE ISSUE" : live ? "COMPARISON ENGINE RUNNING" : "CONNECTING TO COMPARISON ENGINE"}
+              {error ? "COMPARISON ENGINE ISSUE" : archived ? "PAPER EXPERIMENT PAUSED / ARCHIVED" : live ? "COMPARISON ENGINE RUNNING" : "CONNECTING TO COMPARISON ENGINE"}
             </div>
             <div className="cloudMeta">
               {snapshot
-                ? "Last tick " + ago(snapshot.heartbeatAt) + " · every 1 minute · tick #" + snapshot.tickCount
+                ? (archived ? "Archived at tick #" + snapshot.tickCount + " · last tick " + ago(snapshot.heartbeatAt) : "Last tick " + ago(snapshot.heartbeatAt) + " · every 1 minute · tick #" + snapshot.tickCount)
                 : runId
                   ? "Loading first comparison snapshot…"
                   : "Comparison run has not been linked yet."}
@@ -106,7 +113,7 @@ export default function ComparePage() {
           </div>
           <div className="card">
             <div className="label">Strategies</div>
-            <div className="big">7</div>
+            <div className="big">8</div>
             <div className="small">+ buy & hold + cash</div>
           </div>
           <div className="card">
@@ -129,7 +136,7 @@ export default function ComparePage() {
               <div className="pill">paper only</div>
             </div>
             <div className="small" style={{ marginTop: 7 }}>
-              Strict Long, Strict Long/Short, Fast x1/x2/x3/x5, and Adaptive x1–x5 are evaluated independently. Fees and slippage are included; leveraged accounts also include a funding-cost proxy.
+              Strict Long, Strict Long/Short, Fast x1/x2/x3/x5, Adaptive x1–x5, and Consensus Intelligence are evaluated independently. Fees and slippage are included; leveraged accounts also include a funding-cost proxy.
             </div>
           </div>
         </div>

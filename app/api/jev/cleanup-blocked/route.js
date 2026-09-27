@@ -24,6 +24,5 @@ async function cleanup() {
   return Response.json({ ok: true, results });
 }
 
-export async function GET() {
-  return Response.json({ error: "POST only" }, { status: 405 });
-}
+export async function GET() { return cleanup(); }
+export async function POST() { return cleanup(); }

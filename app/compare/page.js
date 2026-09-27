@@ -54,7 +54,7 @@ export default function ComparePage() {
     }
 
     load();
-    const timer = setInterval(load, 15000);
+    const timer = setInterval(load, 60000);
     return () => {
       stopped = true;
       clearInterval(timer);

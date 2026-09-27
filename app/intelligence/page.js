@@ -51,7 +51,7 @@ export default function IntelligencePage() {
       }
     }
     load();
-    const t = setInterval(load, 15000);
+    const t = setInterval(load, 60000);
     return () => { stopped = true; clearInterval(t); };
   }, [runId]);
 

@@ -327,6 +327,7 @@ export async function jevRealtimeWindow(previousState, durationMs) {
     const supervisor = policy(state.portfolio, fresh, now, tape.price);
     hardExits(state.portfolio, tape.price, now, supervisor);
     updateRisk(state.portfolio, tape.price);
+    if (Number(state.model.backoffUntil || 0) > now) return;
     if (!shouldAsk(tape, state.portfolio, now) || supervisor.action === "risk_off") return;
     busy = true;
     pending = false;
@@ -343,7 +344,8 @@ export async function jevRealtimeWindow(previousState, durationMs) {
       state.model.errors += 1;
       state.model.lastError = error && error.message ? error.message : "Jev evaluation failed";
       const permanentish = /credit card|billing|payment|auth|unauthorized|forbidden/i.test(state.model.lastError);
-      state.model.backoffUntil = Date.now() + (permanentish ? 5 * 60 * 1000 : 15 * 1000);
+      const providerBusy = /high demand|retry shortly|rate limit|too many requests|overloaded/i.test(state.model.lastError);
+      state.model.backoffUntil = Date.now() + (permanentish ? 5 * 60 * 1000 : providerBusy ? 60 * 1000 : 15 * 1000);
     } finally {
       busy = false;
       if (pending && !closed && Date.now() - started < durationMs - 300) setTimeout(function() { void decide(); }, 0);

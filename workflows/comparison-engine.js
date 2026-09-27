@@ -119,19 +119,123 @@ function makePortfolio(config) {
     fundingPaid: 0,
     lastDecisionBar: 0,
     lastSignal: null,
+    historical: {
+      closedTrades: 0,
+      wins: 0,
+      losses: 0,
+      grossWin: 0,
+      grossLoss: 0,
+    },
+    historicalRecentTrades: [],
     config,
   };
 }
 
-function initialState() {
+function deriveHistoricalStats(summary) {
+  const closedTrades = Math.max(0, Number(summary?.closedTrades || 0));
+  const wins = Math.max(0, Number(summary?.wins || 0));
+  const losses = Math.max(0, Number(summary?.losses || Math.max(0, closedTrades - wins)));
+  const position = summary?.position || null;
+  const preOpenCash = Number(summary?.cash ?? START_CASH) +
+    (position ? Number(position.initialMargin ?? position.margin ?? 0) + Number(position.entryFee || 0) : 0);
+  const netClosedPnl = preOpenCash - START_CASH + Number(summary?.fundingPaid || 0);
+  const pf = Number(summary?.profitFactor);
+
+  let grossWin = 0;
+  let grossLoss = 0;
+  if (wins === 0) {
+    grossLoss = Math.max(0, -netClosedPnl);
+  } else if (losses === 0) {
+    grossWin = Math.max(0, netClosedPnl);
+  } else if (Number.isFinite(pf) && pf >= 0 && Math.abs(pf - 1) > 1e-9) {
+    grossLoss = netClosedPnl / (pf - 1);
+    grossWin = pf * grossLoss;
+    if (!Number.isFinite(grossLoss) || grossLoss < 0 || !Number.isFinite(grossWin) || grossWin < 0) {
+      grossLoss = Math.max(0, -netClosedPnl);
+      grossWin = Math.max(0, netClosedPnl + grossLoss);
+    }
+  } else {
+    grossLoss = Math.max(0, -netClosedPnl);
+    grossWin = Math.max(0, netClosedPnl + grossLoss);
+  }
+
+  return { closedTrades, wins, losses, grossWin, grossLoss };
+}
+
+function portfolioFromSnapshot(key, config, summary, snapshot) {
+  if (!summary) return makePortfolio(config);
+
+  const portfolio = makePortfolio(config);
+  const equity = Number(summary.equity || START_CASH);
+  const maxDD = Math.max(0, Number(summary.maxDrawdownPct || 0));
+  const impliedPeak = maxDD < 99.9 ? equity / Math.max(1e-6, 1 - maxDD / 100) : START_CASH;
+
+  portfolio.cash = Number(summary.cash ?? equity);
+  portfolio.position = summary.position ? structuredClone(summary.position) : null;
+  portfolio.peak = Math.max(START_CASH, impliedPeak, equity);
+  portfolio.maxDD = maxDD;
+  portfolio.feesPaid = Number(summary.feesPaid || 0);
+  portfolio.fundingPaid = Number(summary.fundingPaid || 0);
+  portfolio.lastDecisionBar = String(config.timeframe || "").startsWith("5m")
+    ? Number(snapshot?.market?.latest5mBar || 0)
+    : Number(snapshot?.market?.latest1mBar || 0);
+  portfolio.lastSignal = summary.signal ? structuredClone(summary.signal) : null;
+  portfolio.historical = deriveHistoricalStats(summary);
+  portfolio.historicalRecentTrades = Array.isArray(summary.trades)
+    ? structuredClone(summary.trades.slice(0, 30))
+    : [];
+  return portfolio;
+}
+
+function initialState(seedSnapshot = null, continuedFromRunId = null) {
+  if (!seedSnapshot?.variants) {
+    const portfolios = {};
+    for (const [key, config] of Object.entries(CONFIGS)) portfolios[key] = makePortfolio(config);
+    return {
+      portfolios,
+      buyHold: null,
+      intelligenceLearning: { pending: [], resolved: 0, correct: 0, lastForecastBar: 0 },
+      startedAt: Date.now(),
+      tickCount: 0,
+      continuity: null,
+    };
+  }
+
   const portfolios = {};
-  for (const [key, config] of Object.entries(CONFIGS)) portfolios[key] = makePortfolio(config);
+  for (const [key, config] of Object.entries(CONFIGS)) {
+    portfolios[key] = portfolioFromSnapshot(key, config, seedSnapshot.variants[key], seedSnapshot);
+  }
+
+  const buyHoldEntry = Number(seedSnapshot?.baselines?.buyHold?.entry || seedSnapshot?.market?.price || 0);
+  const buyHoldFee = START_CASH * (FEE_PCT / 100);
+  const resolved = Math.max(0, Number(seedSnapshot?.intelligence?.learning?.resolvedForecasts || 0));
+  const accuracyPct = Number(seedSnapshot?.intelligence?.learning?.directionalAccuracyPct);
+  const correct = resolved && Number.isFinite(accuracyPct)
+    ? Math.max(0, Math.min(resolved, Math.round(resolved * accuracyPct / 100)))
+    : 0;
+
   return {
     portfolios,
-    buyHold: null,
-    intelligenceLearning: { pending: [], resolved: 0, correct: 0, lastForecastBar: 0 },
-    startedAt: Date.now(),
-    tickCount: 0,
+    buyHold: buyHoldEntry > 0 ? {
+      entry: buyHoldEntry,
+      qty: (START_CASH - buyHoldFee) / buyHoldEntry,
+      entryFee: buyHoldFee,
+    } : null,
+    intelligenceLearning: {
+      pending: [],
+      resolved,
+      correct,
+      lastForecastBar: Number(seedSnapshot?.market?.latest1mBar || 0),
+    },
+    startedAt: Number(seedSnapshot.startedAt || Date.now()),
+    tickCount: Math.max(0, Number(seedSnapshot.tickCount || 0)),
+    continuity: {
+      continuedFromRunId: continuedFromRunId || null,
+      continuedAt: Date.now(),
+      seedHeartbeatAt: Number(seedSnapshot.heartbeatAt || 0),
+      seedTickCount: Math.max(0, Number(seedSnapshot.tickCount || 0)),
+      note: "State-preserving continuation after infrastructure repair; aggregate trade/evidence metrics and open paper positions were carried forward.",
+    },
   };
 }
 
@@ -261,12 +365,36 @@ function updateRisk(portfolio, price) {
   portfolio.maxDD = Math.max(portfolio.maxDD || 0, dd);
 }
 
+function portfolioStats(portfolio) {
+  const historical = portfolio.historical || {};
+  const currentWins = portfolio.trades.filter((t) => Number(t.pnl) > 0).length;
+  const currentLosses = portfolio.trades.filter((t) => Number(t.pnl) <= 0).length;
+  const currentGrossWin = portfolio.trades
+    .filter((t) => Number(t.pnl) > 0)
+    .reduce((s, t) => s + Number(t.pnl || 0), 0);
+  const currentGrossLoss = Math.abs(
+    portfolio.trades
+      .filter((t) => Number(t.pnl) < 0)
+      .reduce((s, t) => s + Number(t.pnl || 0), 0)
+  );
+
+  return {
+    closedTrades: Number(historical.closedTrades || 0) + portfolio.trades.length,
+    wins: Number(historical.wins || 0) + currentWins,
+    losses: Number(historical.losses || 0) + currentLosses,
+    grossWin: Number(historical.grossWin || 0) + currentGrossWin,
+    grossLoss: Number(historical.grossLoss || 0) + currentGrossLoss,
+  };
+}
+
 function summarizePortfolio(portfolio, price) {
   const equity = portfolioEquity(portfolio, price);
-  const wins = portfolio.trades.filter((t) => t.pnl > 0).length;
-  const losses = portfolio.trades.filter((t) => t.pnl <= 0).length;
-  const grossWin = portfolio.trades.filter((t) => t.pnl > 0).reduce((s, t) => s + t.pnl, 0);
-  const grossLoss = Math.abs(portfolio.trades.filter((t) => t.pnl < 0).reduce((s, t) => s + t.pnl, 0));
+  const stats = portfolioStats(portfolio);
+  const recentTrades = [
+    ...portfolio.trades,
+    ...(Array.isArray(portfolio.historicalRecentTrades) ? portfolio.historicalRecentTrades : []),
+  ].slice(0, 30);
+
   return {
     label: portfolio.config.label,
     timeframe: portfolio.config.timeframe,
@@ -274,17 +402,21 @@ function summarizePortfolio(portfolio, price) {
     returnPct: (equity / START_CASH - 1) * 100,
     cash: portfolio.cash,
     maxDrawdownPct: portfolio.maxDD,
-    closedTrades: portfolio.trades.length,
-    wins,
-    losses,
-    winRatePct: portfolio.trades.length ? (wins / portfolio.trades.length) * 100 : null,
-    profitFactor: grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? null : null,
+    closedTrades: stats.closedTrades,
+    wins: stats.wins,
+    losses: stats.losses,
+    winRatePct: stats.closedTrades ? (stats.wins / stats.closedTrades) * 100 : null,
+    profitFactor: stats.grossLoss > 0 ? stats.grossWin / stats.grossLoss : stats.grossWin > 0 ? null : null,
     feesPaid: portfolio.feesPaid,
     fundingPaid: portfolio.fundingPaid,
     position: portfolio.position,
     signal: portfolio.lastSignal,
     config: portfolio.config,
-    trades: portfolio.trades.slice(0, 30),
+    trades: recentTrades,
+    continuity: portfolio.historical?.closedTrades ? {
+      migratedClosedTrades: Number(portfolio.historical.closedTrades || 0),
+      newClosedTrades: portfolio.trades.length,
+    } : null,
   };
 }
 
@@ -331,12 +463,9 @@ function fixedSupervisorPolicy(state, now, latest1mBar, latest5mBar, price) {
   const learning = state.intelligenceLearning;
   const resolved = Number(learning.resolved || 0);
   const accuracy = resolved > 0 ? Number(learning.correct || 0) / resolved : null;
-  const trades = portfolio.trades || [];
-  const wins = trades.filter((t) => Number(t.pnl) > 0).length;
-  const winRate = trades.length ? wins / trades.length : null;
-  const grossWin = trades.filter((t) => Number(t.pnl) > 0).reduce((s, t) => s + Number(t.pnl || 0), 0);
-  const grossLoss = Math.abs(trades.filter((t) => Number(t.pnl) < 0).reduce((s, t) => s + Number(t.pnl || 0), 0));
-  const profitFactor = grossLoss > 0 ? grossWin / grossLoss : null;
+  const stats = portfolioStats(portfolio);
+  const winRate = stats.closedTrades ? stats.wins / stats.closedTrades : null;
+  const profitFactor = stats.grossLoss > 0 ? stats.grossWin / stats.grossLoss : null;
   const equity = portfolioEquity(portfolio, price);
   const returnPct = (equity / START_CASH - 1) * 100;
   const age1mMs = now - Number(latest1mBar || 0) * 1000;
@@ -383,7 +512,7 @@ function fixedSupervisorPolicy(state, now, latest1mBar, latest5mBar, price) {
   }
 
   const weakForecastEvidence = resolved >= 50 && accuracy !== null && accuracy < 0.45;
-  const weakTradeEvidence = trades.length >= 10 && returnPct < -0.5 && winRate !== null && winRate < 0.25 &&
+  const weakTradeEvidence = stats.closedTrades >= 10 && returnPct < -0.5 && winRate !== null && winRate < 0.25 &&
     (profitFactor === null || profitFactor < 0.5);
 
   if (weakForecastEvidence || weakTradeEvidence) {
@@ -564,6 +693,7 @@ export async function compareTick(previousState) {
     checkIntervalSeconds: 60,
     tickCount: state.tickCount,
     startedAt: state.startedAt,
+    continuity: state.continuity,
     market: {
       price,
       provider1m: m1.provider,
@@ -625,10 +755,10 @@ export async function emitComparison(snapshot) {
   }
 }
 
-export async function comparisonEngine() {
+export async function comparisonEngine(seedSnapshot = null, continuedFromRunId = null) {
   "use workflow";
 
-  let state = initialState();
+  let state = initialState(seedSnapshot, continuedFromRunId);
 
   while (true) {
     try {

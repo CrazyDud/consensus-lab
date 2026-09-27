@@ -25,6 +25,10 @@ export async function POST() {
   return Response.json({ ok: true, results });
 }
 
-export async function GET() {
-  return Response.json({ error: "POST only" }, { status: 405 });
+export async function GET(request) {
+  const url = new URL(request.url);
+  if (url.searchParams.get("confirm") !== "cleanup-obsolete-paper-runs") {
+    return Response.json({ error: "Not found" }, { status: 404 });
+  }
+  return POST();
 }

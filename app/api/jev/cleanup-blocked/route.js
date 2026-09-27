@@ -7,7 +7,7 @@ const RUNS = [
   "wrun_01M3H9SMV2T2N2HJJDK5TPQAFN"
 ];
 
-export async function POST() {
+async function cleanup() {
   const results = [];
   for (const runId of RUNS) {
     try {

@@ -341,7 +341,9 @@ export async function jevRealtimeWindow(previousState, durationMs) {
       applyDecision(state, decision, tape, supervisor, Date.now());
     } catch (error) {
       state.model.errors += 1;
-      state.model.lastError = error && error.message ? error.message : "Jev evaluation failed";\n      const permanentish = /credit card|billing|payment|auth|unauthorized|forbidden/i.test(state.model.lastError);\n      state.model.backoffUntil = Date.now() + (permanentish ? 5 * 60 * 1000 : 15 * 1000);
+      state.model.lastError = error && error.message ? error.message : "Jev evaluation failed";
+      const permanentish = /credit card|billing|payment|auth|unauthorized|forbidden/i.test(state.model.lastError);
+      state.model.backoffUntil = Date.now() + (permanentish ? 5 * 60 * 1000 : 15 * 1000);
     } finally {
       busy = false;
       if (pending && !closed && Date.now() - started < durationMs - 300) setTimeout(function() { void decide(); }, 0);
